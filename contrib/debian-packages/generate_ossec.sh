@@ -25,8 +25,9 @@ source_file="ossec-hids-${ossec_version}.tar.gz"
 #packages=(ossec-hids ossec-hids-agent) # only options available
 packages=(ossec-hids ossec-hids-agent)
 
-# codenames=(sid jessie wheezy precise trusty utopic) 
-codenames=(sid jessie wheezy precise trusty utopic) 
+# codenames=(sid jessie wheezy precise trusty utopic)
+codenames=(sid jessie wheezy precise trusty utopic)
+
 
 # For Debian use: sid, jessie or wheezy (hardcoded in update_changelog function)
 # For Ubuntu use: lucid, precise, trusty or utopic
@@ -44,6 +45,7 @@ signing_pass='XXXX'
 debian_files_path="/home/ubuntu/debian_files"
 
 # Setting up logfile
+scriptname=$(basename $0)
 scriptpath=$( cd $(dirname $0) ; pwd -P )
 logfile=$scriptpath/ossec_packages.log
 
@@ -51,13 +53,13 @@ logfile=$scriptpath/ossec_packages.log
 #
 # Function to write to LOG_FILE
 #
-write_log() 
+write_log()
 {
   if [ ! -e "$logfile" ] ; then
     touch "$logfile"
   fi
   while read text
-  do 
+  do
       local logtime=`date "+%Y-%m-%d %H:%M:%S"`
       echo $logtime": $text" | tee -a $logfile;
   done
@@ -79,13 +81,13 @@ contains_element() {
 # Show help function
 #
 show_help()
-{ 
+{
   echo "
   This tool can be used to generate OSSEC packages for Ubuntu and Debian.
 
   CONFIGURATION: The script is currently configured with the following variables:
-    * Packages: ${packages[*]}. 
-    * Distributions: ${codenames[*]}. 
+    * Packages: ${packages[*]}.
+    * Distributions: ${codenames[*]}.
     * Architectures: ${architectures[*]}.
     * OSSEC version: ${ossec_version}.
     * Source file: ${source_file}.
@@ -93,6 +95,7 @@ show_help()
 
   USAGE: Command line arguments available:
     -h | --help     Displays this help.
+    -c | --create   Updates chroot environments.
     -u | --update   Updates chroot environments.
     -d | --download Downloads source file and prepares source directories.
     -b | --build    Builds deb packages.
@@ -161,7 +164,7 @@ update_changelog()
   if contains_element $codename ${codenames_ubuntu[*]} ; then
     local debdist=$codename
   fi
-  
+
   # Modifying file
   local changelogtime=$(date -R)
   local last_date_changed=0
@@ -190,21 +193,83 @@ update_changelog()
   mv ${changelog_file_tmp} ${changelog_file}
 }
 
+#
+# Create chroot environments
+#
+create_chroots()
+{
+  for codename in ${codenames[@]}; do
+    for arch in ${architectures[@]}; do
+      NAME="${codename}-${arch}"
+      BUILDPLACE="/var/cache/pbuilder/build/"
+      DISTRIBUTION=${codename}
+      ARCHITECTURE=${arch}
+      APTCACHE="/var/cache/pbuilder/${NAME}/aptcache/"
+      BUILDRESULT="/var/cache/pbuilder/${NAME}/result/"
+      BASETGZ="/var/cache/pbuilder/${NAME}-base.tgz"
+      #Test if everything already exists
+      if [ -d ${BUILDPLACE} -a -d ${APTCACHE} -a -d ${BUILDRESULT} -a -e ${BASETGZ} ]; then
+        echo "chroot environment: ${NAME} appears to exist" | write_log
+      else
+        echo "Creating chroot environment: ${NAME}" | write_log
+        sudo mkdir -p ${BUILDPLACE}
+        sudo mkdir -p ${APTCACHE}
+        sudo mkdir -p ${BUILDRESULT}
+
+        if sudo pbuilder --create \
+        --buildplace ${BUILDPLACE} \
+        --distribution ${DISTRIBUTION} \
+        --architecture ${ARCHITECTURE} \
+        --aptcache ${APTCACHE} \
+        --buildresult ${BUILDRESULT} \
+        --basetgz ${BASETGZ}; then
+          echo "Successfully created chroot environment: ${codename}-${arch}" | write_log
+        else
+          echo "Error: Problem detected creating chroot environment: ${codename}-${arch}" | write_log
+        fi
+      fi
+    done
+  done
+}
 
 #
 # Update chroot environments
 #
 update_chroots()
 {
-  for codename in ${codenames[@]}
-  do
-    for arch in ${architectures[@]}
-    do
-      echo "Updating chroot environment: ${codename}-${arch}" | write_log
-      if sudo DIST=$codename ARCH=$arch pbuilder update ; then
-        echo "Successfully updated chroot environment: ${codename}-${arch}" | write_log
+  for codename in ${codenames[@]}; do
+    for arch in ${architectures[@]}; do
+      NAME="${codename}-${arch}"
+      BUILDPLACE="/var/cache/pbuilder/build/"
+      DISTRIBUTION=${codename}
+      ARCHITECTURE=${arch}
+      APTCACHE="/var/cache/pbuilder/${NAME}/aptcache/"
+      BUILDRESULT="/var/cache/pbuilder/${NAME}/result/"
+      BASETGZ="/var/cache/pbuilder/${NAME}-base.tgz"
+      if ! [ -d ${BUILDPLACE} -a -d ${APTCACHE} -a -d ${BUILDRESULT} -a -e ${BASETGZ} ]; then
+        echo "chroot environment: ${NAME} doesn't exist" | write_log
+        echo "Please run $scriptname -c | --create" | write_log
       else
-        echo "Error: Problem detected updating chroot environment: ${codename}-${arch}" | write_log
+        echo "Updating chroot environment: ${NAME}" | write_log
+        #if sudo \
+        #BUILDPLACE="/var/cache/pbuilder/build/" \
+        #DIST=${codename} \
+        #ARCH=${arch} \
+        #APTCACHE="/var/cache/pbuilder/${NAME}/aptcache/" \
+        #BUILDRESULT="/var/cache/pbuilder/${NAME}/result/" \
+        #BASETGZ="/var/cache/pbuilder/${NAME}-base.tgz" \
+        #pbuilder update ; then
+        if sudo pbuilder --update \
+        --buildplace ${BUILDPLACE} \
+        --distribution ${DISTRIBUTION} \
+        --architecture ${ARCHITECTURE} \
+        --aptcache ${APTCACHE} \
+        --buildresult ${BUILDRESULT} \
+        --basetgz ${BASETGZ}; then
+          echo "Successfully updated chroot environment: ${codename}-${arch}" | write_log
+        else
+          echo "Error: Problem detected updating chroot environment: ${codename}-${arch}" | write_log
+        fi
       fi
     done
   done
@@ -272,7 +337,7 @@ build_packages()
 {
 
 for package in ${packages[@]}
-do 
+do
   for codename in ${codenames[@]}
   do
     for arch in ${architectures[@]}
@@ -286,7 +351,7 @@ do
         echo "Error: Couldn't find changelog file for ${package}-${ossec_version}" | write_log
         exit 1
       fi
-      
+
       # Updating changelog file with new codename, date and debdist.
       if update_changelog ${changelog_file} ${codename} ; then
         echo " + Changelog file ${changelog_file} updated for $package ${codename}-${arch}" | write_log
@@ -296,7 +361,7 @@ do
       fi
 
       # Setting up global variable package_version, used for deb_file and changes_file
-      read_package_version ${changelog_file}      
+      read_package_version ${changelog_file}
       local deb_file="${package}_${ossec_version}-${package_version}${codename}_${arch}.deb"
       local changes_file="${package}_${ossec_version}-${package_version}${codename}_${arch}.changes"
       local dsc_file="${package}_${ossec_version}-${package_version}${codename}.dsc"
@@ -324,7 +389,7 @@ do
         echo "Error: Could not find ${results_dir}/${deb_file}" | write_log
         exit 1
       fi
-      
+
       # Checking that package has at least 50 files to confirm it has been built correctly
       local files=$(sudo /usr/bin/dpkg --contents ${results_dir}/${deb_file} | wc -l)
       if [ "${files}" -lt "50" ]; then
@@ -406,7 +471,7 @@ do
       else
         echo "Error: Could not upload package ${changes_file} for ${codename} to the repository" | write_log
         exit 1
-      fi 
+      fi
 
       # Checking if it is an Ubuntu package
       if contains_element $codename ${codenames_ubuntu[*]} ; then
@@ -417,7 +482,7 @@ do
 
       # Moving package to the right directory at the OSSEC apt repository server
       echo " + Adding package /opt/incoming/${deb_file} to server repository for ${codename} distribution" | write_log
-      if [ $is_ubuntu -eq 1 ]; then 
+      if [ $is_ubuntu -eq 1 ]; then
         remove_package="cd /var/www/repos/apt/ubuntu; reprepro -A ${arch} remove ${codename} ${package}"
         include_package="cd /var/www/repos/apt/ubuntu; reprepro includedeb ${codename} /opt/incoming/${deb_file}"
       else
@@ -432,7 +497,7 @@ do
         expect -re \".*enter passphrase:.*\" { send \"${signing_pass}\r\" }
         expect -re \".*deleting.*\"
       "
-      
+
       /usr/bin/expect -c "
         spawn sudo ssh root@ossec-repository \"${include_package}\"
         expect -re \"Skipping inclusion.*\" { exit 1 }
@@ -463,30 +528,34 @@ shift
 
 case $key in
   -h|--help)
-    show_help
-    exit 0
-    ;;
+  show_help
+  exit 0
+  ;;
+  -c|--create)
+  create_chroots
+  shift
+  ;;
   -u|--update)
-    update_chroots
-    shift
-    ;;
+  update_chroots
+  shift
+  ;;
   -d|--download)
-    download_source
-    shift
-    ;;
+  download_source
+  shift
+  ;;
   -b|--build)
-    build_packages
-    shift
-    ;;
+  build_packages
+  shift
+  ;;
   -s|--sync)
-    sync_repository
-    shift
-    ;;
+  sync_repository
+  shift
+  ;;
   *)
-    echo "Unknown command line argument."
-    show_help
-    exit 0
-    ;;
+  echo "Unknown command line argument."
+  show_help
+  exit 0
+  ;;
   esac
 done
 
